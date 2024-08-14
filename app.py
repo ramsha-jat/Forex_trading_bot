@@ -1,96 +1,121 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session
-from werkzeug.utils import secure_filename
-from openai import OpenAI
-import google.generativeai as genai
-import anthropic
+import streamlit as st
+from anthropic import Anthropic
 import dotenv
 import os
-from PIL import Image
-import base64
-from io import BytesIO
-import random
 
 dotenv.load_dotenv()
-
-app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "default-secret-key")
-app.config['UPLOAD_FOLDER'] = 'uploads/'
 
 anthropic_models = [
     "claude-3-5-sonnet-20240620"
 ]
 
-
+# Function to convert the messages format to Anthropic
 def messages_to_anthropic(messages):
-    # Same function as before
-    pass
+    anthropic_messages = []
+    prev_role = None
+    for message in messages:
+        if prev_role and (prev_role == message["role"]):
+            anthropic_message = anthropic_messages[-1]
+        else:
+            anthropic_message = {
+                "role": message["role"],
+                "content": [],
+            }
+        anthropic_message["content"].append(message["content"][0])
 
+        if prev_role != message["role"]:
+            anthropic_messages.append(anthropic_message)
 
-def stream_llm_response(model_params, model_type="openai", api_key=None):
-    # Same function as before
-    pass
-
-
-def get_image_base64(image_raw):
-    buffered = BytesIO()
-    image_raw.save(buffered, format=image_raw.format)
-    img_byte = buffered.getvalue()
-    return base64.b64encode(img_byte).decode('utf-8')
-
-
-def base64_to_image(base64_string):
-    base64_string = base64_string.split(",")[1]
-    return Image.open(BytesIO(base64.b64decode(base64_string)))
-
-
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        # Handling form submission for model selection and API keys
-        anthropic_api_key = request.form.get("anthropic_api_key")
-        model = request.form.get("model")
-        temperature = float(request.form.get("temperature", 0.3))
+        prev_role = message["role"]
         
-        model_params = {
-            "model": model,
-            "temperature": temperature,
-        }
+    return anthropic_messages
 
-        session["api_keys"] = {
-            "anthropic": anthropic_api_key
-        }
-        session["model_params"] = model_params
+# Function to query and stream the response from Anthropic's Claude model
+def stream_llm_response(model_params, api_key=None):
+    response_message = ""
+    client = Anthropic(api_key=api_key)
 
-        # Adding user message
-        user_message = request.form.get("user_message")
-        if user_message:
-            session["messages"] = session.get("messages", [])
-            session["messages"].append({"role": "user", "content": [{"type": "text", "text": user_message}]})
-        
-        # Adding image if uploaded
-        if 'image_file' in request.files:
-            image_file = request.files['image_file']
-            if image_file.filename != '':
-                filename = secure_filename(image_file.filename)
-                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                image_file.save(file_path)
+    with client.messages.stream(
+        model=model_params["model"] if "model" in model_params else "claude-3-5-sonnet-20240620",
+        messages=messages_to_anthropic(st.session_state.messages),
+        temperature=model_params["temperature"] if "temperature" in model_params else 0.3,
+        max_tokens=4096,
+    ) as stream:
+        for text in stream.text_stream:
+            response_message += text
+            yield text
 
-                # Process image
-                raw_img = Image.open(file_path)
-                img = get_image_base64(raw_img)
-                session["messages"].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}}]})
-        
-        return redirect(url_for('index'))
+    st.session_state.messages.append({
+        "role": "assistant", 
+        "content": [
+            {
+                "type": "text",
+                "text": response_message,
+            }
+        ]
+    })
 
-    # Render the page with the messages and model options
-    return render_template("index.html", messages=session.get("messages", []), models=anthropic_models )
+def main():
 
+    # --- Page Config ---
+    st.set_page_config(
+        page_title="The OmniChat",
+        page_icon="🤖",
+        layout="centered",
+        initial_sidebar_state="expanded",
+    )
 
-@app.route("/reset", methods=["POST"])
-def reset():
-    session.pop("messages", None)
-    return redirect(url_for("index"))
+    # --- Header ---
+    st.markdown("""<h1 style="text-align: center; color: #6ca395;">🤖 <i>The OmniChat</i> 💬</h1>""", unsafe_allow_html=True)
 
+    # --- Side Bar ---
+    with st.sidebar:
+        default_anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") if os.getenv("ANTHROPIC_API_KEY") is not None else ""
+        anthropic_api_key = st.text_input("Introduce your Anthropic API Key (https://console.anthropic.com/)", value=default_anthropic_api_key, type="password")
+
+    # --- Main Content ---
+    if anthropic_api_key == "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" or anthropic_api_key is None:
+        st.write("#")
+        st.warning("⬅️ Please introduce an Anthropic API Key to continue...")
+    else:
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+
+        # Displaying the previous messages if there are any
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                for content in message["content"]:
+                    if content["type"] == "text":
+                        st.markdown(content["text"])
+
+        # User input
+        with st.chat_message("user"):
+            model_params = {
+                "model": st.selectbox("Model:", anthropic_models),
+                "temperature": st.slider("Temperature:", min_value=0.0, max_value=1.0, value=0.3, step=0.1),
+            }
+
+            user_message = st.text_area("Write your message here:", height=100)
+            if user_message:
+                user_input = {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": user_message,
+                        }
+                    ],
+                }
+                st.session_state.messages.append(user_input)
+
+        # Displaying the response in a stream manner
+        with st.chat_message("assistant"):
+            st.markdown("")
+            for chunk in stream_llm_response(
+                model_params=model_params, 
+                api_key=anthropic_api_key,
+            ):
+                st.markdown(chunk)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    main()

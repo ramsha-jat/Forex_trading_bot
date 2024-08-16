@@ -11,7 +11,7 @@ app.secret_key = 'your_secret_key'  # Replace with a strong secret key for sessi
 
 # Initialize Anthropic client
 client = anthropic.Anthropic(
-    api_key=os.getenv("ANTHROPIC_API_KEY"),
+    api_key=os.getenv("Put your key here"),
 )
 
 @app.route("/", methods=["GET", "POST"])

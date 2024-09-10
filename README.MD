@@ -46,7 +46,7 @@ This is getting data after every 30 minutes and feed this data to claude sonnet3
 
 After this it will acces the forex trade website and acces the tabular data for currencies exhange . Then data will feed to  claude sonnet 3.5 for predictions and news generation . The model is getting current data after every 30 minutes. Each time, After news generation it will send email to recipients. In the email you will found out the exchnge rates for different currency pairs , volatility of a currency and many more on this for a reference a sample of emails is atatched below.
 
-![Forex Scraping Example](emails\image.png)
+![Forex Scraping Example](emails/image.png)
 
-![Generated News Example](emails\img.png)
+![Generated News Example](emails/img.png)
 
